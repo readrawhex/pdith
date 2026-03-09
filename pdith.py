@@ -36,7 +36,7 @@ def from_hex(hexstr: str) -> (int, int, int):
     return (int(hexstr[0] * 2, 16), int(hexstr[1] * 2, 16), int(hexstr[2] * 2, 16))
 
 
-def get_matrix(width: int, height: int, seed: int = None, dims: (int, int) = None, res: int = 1) -> [[(int, int, int)]]:
+def get_matrix(width: int, height: int, seed: int = None, dims: (int, int) = None, res: int = 1, curve: float = 1) -> [[(int, int, int)]]:
     """Generate a matrix for use with dithering.
 
     Generate a matrix for use with dithering calculations, where an argument for `seed` can
@@ -50,6 +50,10 @@ def get_matrix(width: int, height: int, seed: int = None, dims: (int, int) = Non
     :vartype width: int
     :param height: height of returned matrix
     :vartype height: int
+    :param res: "block" size of pixels within matrix
+    :vartype res: int
+    :param curve: curve values within matrix by applying exponent `curve`
+    :vartype curve: float
     :returns: a matrix of RGB color tuples (height X width)
     :rtype: [[int]]
     """
@@ -68,6 +72,14 @@ def get_matrix(width: int, height: int, seed: int = None, dims: (int, int) = Non
     rng = np.random.default_rng(seed)
     m = rng.integers(0, 256, size=(height, width), dtype=np.uint8)
 
+    if curve != 1:
+        tmp = m.astype(np.float32)
+        np.divide(tmp, 255.0, out=tmp)
+        np.power(tmp, curve, out=tmp)
+        np.multiply(tmp, 255.0, out=tmp)
+        np.clip(tmp, 0, 255, out=tmp)
+        m = tmp.astype(np.uint8)
+
     if res > 1:
         m = np.repeat(m, res, axis=0)
         m = np.repeat(m, res, axis=1)
@@ -76,8 +88,6 @@ def get_matrix(width: int, height: int, seed: int = None, dims: (int, int) = Non
         m = m[np.arange(f_h) % height][:, np.arange(f_w) % width]
 
     return m
-
-
 
 
 def main():
@@ -93,6 +103,7 @@ def main():
         parser.add_argument("-r", "--resolution", type=int, default=1, help="size of individual pixels in dither matrix")
         parser.add_argument("-m", "--matrix-m", type=int, default=8, help="matrix resolution, or matrix width if used with -n")
         parser.add_argument("-n", "--matrix-n", type=int, help="matrix resolution, or matrix height if used with -m")
+        parser.add_argument("-c", "--curve", type=float, default=1, help="curve threshold values within dither matrix by exponent CURVE")
         parser.add_argument("--seed", type=int, help="seed for matrix generation")
         args = parser.parse_args()
 
@@ -118,7 +129,7 @@ def main():
                 else:
                     bg = np.full(pixels.shape, color_value, dtype=np.uint8)
 
-                matrix = get_matrix(args.matrix_m, args.matrix_n, args.seed, brightness.shape, args.resolution)
+                matrix = get_matrix(args.matrix_m, args.matrix_n, args.seed, brightness.shape, args.resolution, args.curve)
 
                 result = np.zeros_like(pixels, dtype=np.uint8)
                 result = np.where(
@@ -143,7 +154,7 @@ def main():
                 new_pixels = np.asarray(new_img)
                 brightness = new_pixels @ bweights
 
-                matrix = get_matrix(args.matrix_m, args.matrix_n, args.seed, brightness.shape, args.resolution)
+                matrix = get_matrix(args.matrix_m, args.matrix_n, args.seed, brightness.shape, args.resolution, args.curve)
                 pixels = np.where(
                     brightness[..., None] < matrix[..., None] if args.invert else brightness[..., None] >= matrix[..., None], 
                     new_pixels, 
