@@ -4,10 +4,6 @@ Picture dithering utility
 
 ---
 
-I wrote something similar in rust called [rdith](https://github.com/readrawhex/rdith)
-a little bit ago, but I wanted something quicker to install and compile on
-my phone.
-
 ### install
 
 ```bash
