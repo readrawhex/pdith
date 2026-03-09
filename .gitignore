@@ -1,0 +1,5 @@
+**/.venv/
+**/build/
+**/pdith.egg-info/
+**/output/
+**/*.png
