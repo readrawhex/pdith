@@ -296,17 +296,16 @@ def dither(
     :returns: dithered output frame
     :rtype: npt.NDArray[np.uint8]
     """
-    brightness = tf @ bweights
-    result = np.zeros_like(tf, dtype=np.uint8)
-    return np.where(
-        (
-            brightness[..., None] < m[..., None]
-            if invert
-            else brightness[..., None] >= m[..., None]
-        ),
-        tf,
-        bf,
-    )
+    brightness = (tf @ bweights).astype(np.uint8)
+    if invert:
+        mask = brightness < m
+    else:
+        mask = brightness >= m
+    mask = mask[..., None]
+
+    out = bf.copy()
+    out[mask] = tf[mask]
+    return out
 
 
 def create_output(filename: str, generators: [iter], args: argparse.Namespace):
@@ -331,12 +330,13 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
         for x in range(0, len(generators) - 1)
     ]
 
-    def generate(idx: int = 0):
+    def generate():
         """recursive layered dithering"""
-        if idx == len(ms):
-            return next(generators[idx])
-        bf = next(generators[idx])
-        return dither(bf, generate(idx + 1), ms[idx], args.invert)
+        frame = next(generators[-1])
+        for i in reversed(range(len(ms))):
+            bf = next(generators[i])
+            frame = dither(bf, frame, ms[i], args.invert)
+        return frame
 
     of = output_filepath(filename, args.output)
     if _setup["frame_length"] == 1:
