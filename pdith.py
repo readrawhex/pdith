@@ -297,15 +297,16 @@ def dither(
     :rtype: npt.NDArray[np.uint8]
     """
     brightness = (tf @ bweights).astype(np.uint8)
-    if invert:
-        mask = brightness < m
-    else:
-        mask = brightness >= m
-    mask = mask[..., None]
-
-    out = bf.copy()
-    out[mask] = tf[mask]
-    return out
+    result = np.zeros_like(tf, dtype=np.uint8)
+    return np.where(
+        (
+            brightness[..., None] < m[..., None]
+            if invert
+            else brightness[..., None] >= m[..., None]
+        ),
+        tf,
+        bf,
+    )
 
 
 def create_output(filename: str, generators: [iter], args: argparse.Namespace):
