@@ -297,16 +297,14 @@ def dither(
     :rtype: npt.NDArray[np.uint8]
     """
     brightness = (tf @ bweights).astype(np.uint8)
-    result = np.zeros_like(tf, dtype=np.uint8)
-    return np.where(
-        (
-            brightness[..., None] < m[..., None]
-            if invert
-            else brightness[..., None] >= m[..., None]
-        ),
-        tf,
-        bf,
-    )
+    if invert:
+        mask = brightness < m
+    else:
+        mask = brightness >= m
+
+    out = bf.copy()
+    out[mask] = tf[mask]
+    return out
 
 
 def create_output(filename: str, generators: [iter], args: argparse.Namespace):
@@ -332,7 +330,7 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
     ]
 
     def generate():
-        """recursive layered dithering"""
+        """layered dithering"""
         frame = next(generators[-1])
         for i in reversed(range(len(ms))):
             bf = next(generators[i])
@@ -346,7 +344,11 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
     else:
         clip = VideoClip(lambda t: generate(), duration=_setup["duration"])
         clip.fps = _setup["fps"]
-        clip.write_videofile(of)
+        clip.write_videofile(
+            of, 
+            threads=1,
+            preset=("medium" if args.quality_encoding else "ultrafast")
+        )
     print(of)
 
 
@@ -417,6 +419,12 @@ def main():
             type=float,
             default=1,
             help="curve threshold values within dither matrix by exponent CURVE",
+        )
+        parser.add_argument(
+            "-e",
+            "--quality-encoding",
+            action="store_true",
+            help="use higher quality encoding for smaller file size in videos",
         )
         parser.add_argument("--seed", type=int, help="seed for matrix generation")
         args = parser.parse_args()
