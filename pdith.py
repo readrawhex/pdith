@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import progressbar
 from itertools import repeat
 from moviepy import VideoClip, VideoFileClip
 from moviepy.video.fx import Resize
@@ -342,12 +343,48 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
         img = Image.fromarray(generate())
         img.save(of)
     else:
-        clip = VideoClip(lambda t: generate(), duration=_setup["duration"])
-        clip.fps = _setup["fps"]
-        clip.write_videofile(
-            of, 
-            preset=("medium" if args.quality_encoding else "ultrafast")
-        )
+        if args.disable_moviepy:
+            h, w = _setup["dimensions"]
+
+            proc = subprocess.Popen(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f", "rawvideo",
+                    "-vcodec", "rawvideo",
+                    "-pix_fmt", "rgb24",
+                    "-s", f"{w}x{h}",
+                    "-r", str(_setup["fps"]),
+                    "-i", "-",
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-pix_fmt", "yuv420p",
+                    of,
+                ],
+                stdin=subprocess.PIPE,
+            )
+
+
+            bar = progressbar.ProgressBar(max_value=_setup["frame_length"], widgets=[
+                filename, 
+                progressbar.Bar(),
+                ' (', progressbar.Percentage(), ') ',
+                progressbar.ETA(),
+            ])
+            for i in range(_setup["frame_length"]):
+                frame = generate()
+                proc.stdin.write(frame.tobytes())
+                bar.update(i)
+            bar.finish()
+            proc.stdin.close()
+            proc.wait()
+        else:
+            clip = VideoClip(lambda t: generate(), duration=_setup["duration"])
+            clip.fps = _setup["fps"]
+            clip.write_videofile(
+                of, 
+                preset=("medium" if args.quality_encoding else "ultrafast")
+            )
     print(of)
 
 
@@ -424,6 +461,12 @@ def main():
             "--quality-encoding",
             action="store_true",
             help="use higher quality encoding for smaller file size in videos",
+        )
+        parser.add_argument(
+            "-N",
+            "--disable-moviepy",
+            action="store_true",
+            help="process single frames with ffmpeg instead of using moviepy",
         )
         parser.add_argument("--seed", type=int, help="seed for matrix generation")
         args = parser.parse_args()
