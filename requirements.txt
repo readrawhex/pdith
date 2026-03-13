@@ -12,7 +12,6 @@ moviepy==2.2.1
 numpy==2.4.2
 pillow==11.3.0
 proglog==0.1.12
-progressbar2==4.5.0
 Pygments==2.19.2
 python-dotenv==1.2.2
 python-magic==0.4.27

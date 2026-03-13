@@ -9,7 +9,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import progressbar
 from itertools import repeat
 from moviepy import VideoClip, VideoFileClip
 from moviepy.video.fx import Resize
@@ -364,18 +363,9 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
                 stdin=subprocess.PIPE,
             )
 
-
-            bar = progressbar.ProgressBar(max_value=_setup["frame_length"], widgets=[
-                filename, 
-                progressbar.Bar(),
-                ' (', progressbar.Percentage(), ') ',
-                progressbar.ETA(),
-            ])
-            for i in range(_setup["frame_length"]):
+            for _ in range(_setup["frame_length"]):
                 frame = generate()
                 proc.stdin.write(frame.tobytes())
-                bar.update(i)
-            bar.finish()
             proc.stdin.close()
             proc.wait()
         else:
