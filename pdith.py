@@ -346,7 +346,6 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
         clip.fps = _setup["fps"]
         clip.write_videofile(
             of, 
-            threads=1,
             preset=("medium" if args.quality_encoding else "ultrafast")
         )
     print(of)
