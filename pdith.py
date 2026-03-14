@@ -249,7 +249,6 @@ def open_file(
         new_length = None
         if _setup["dimensions"] is None or reset:
             _setup["dimensions"] = (video.h, video.w)
-            print(scale, ":", _setup["dimensions"])
         else:
             new_dims = _setup["dimensions"]
 
@@ -518,7 +517,7 @@ def main():
             "-s",
             "--scale",
             type=float,
-            help="scale input dimensions by SCALE value (for base input dimensions)"
+            help="scale input dimensions by SCALE value (for base input dimensions)",
         )
 
         parser.add_argument("--seed", type=int, help="seed for matrix generation")
@@ -527,7 +526,11 @@ def main():
         os.makedirs(args.output, exist_ok=True)
 
         if args.individual or args.background:
-            bg_img = open_file(args.background, scale=args.scale) if args.background else None
+            bg_img = (
+                open_file(args.background, scale=args.scale)
+                if args.background
+                else None
+            )
             color_value = from_hex(args.individual) if args.individual else None
 
             for f in args.images:
@@ -553,13 +556,14 @@ def main():
                 raise Exception("must provide 2 or more files for layered dithering")
 
             frames = open_file(args.images[0], scale=args.scale)
-            generators = [frames] + [open_file(x, scale=args.scale) for x in args.images[1:]]
+            generators = [frames] + [
+                open_file(x, scale=args.scale) for x in args.images[1:]
+            ]
             create_output(args.images[0], generators, args)
 
         for f in _tempfiles:
             os.remove(f)
     except Exception as e:
-        raise (e)
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 

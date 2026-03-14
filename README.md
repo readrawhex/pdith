@@ -22,9 +22,9 @@ pipx install .
 ### usage
 
 ```
-usage: pdith.py [-h] [-l] [-s [INDIVIDUAL]] [-i] [-b BACKGROUND] [-f MASK]
+usage: pdith.py [-h] [-l] [-I [INDIVIDUAL]] [-i] [-b BACKGROUND] [-f MASK]
                 [-o OUTPUT] [-r RESOLUTION] [-m MATRIX_M] [-n MATRIX_N]
-                [-c CURVE] [--seed SEED]
+                [-c CURVE] [-e] [-N] [-s SCALE] [--seed SEED]
                 images [images ...]
 
 picture dithering utility
@@ -35,7 +35,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -l, --layer           use layer mode for dithering (default)
-  -s [INDIVIDUAL], --individual [INDIVIDUAL]
+  -I [INDIVIDUAL], --individual [INDIVIDUAL]
                         use individual mode for dithering with provided
                         background color (default=#000)
   -i, --invert          invert mask for dithering
@@ -55,5 +55,14 @@ options:
   -c CURVE, --curve CURVE
                         curve threshold values within dither matrix by
                         exponent CURVE
+  -e, --quality-encoding
+                        use higher quality encoding for smaller file size in
+                        videos
+  -N, --disable-moviepy
+                        process single frames with ffmpeg instead of using
+                        moviepy
+  -s SCALE, --scale SCALE
+                        scale input dimensions by SCALE value (for base input
+                        dimensions)
   --seed SEED           seed for matrix generation
 ```
