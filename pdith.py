@@ -116,10 +116,9 @@ def get_matrix(
     rng = np.random.default_rng(seed)
     if buffer is None or buffer.shape != (height, width):
         buffer = np.empty((height, width), dtype=np.uint8)
-    buffer[:] = np.frombuffer(
-        rng.bytes(buffer.size),
-        dtype=np.uint8
-    ).reshape(buffer.shape)
+    buffer[:] = np.frombuffer(rng.bytes(buffer.size), dtype=np.uint8).reshape(
+        buffer.shape
+    )
 
     if curve != 1:
         tmp = buffer.astype(np.float32, copy=False)
@@ -225,13 +224,17 @@ def rescale_video(
     return clip
 
 
-def open_file(filepath: str, reset: bool = False) -> Iterator[npt.NDArray[np.uint8]]:
+def open_file(
+    filepath: str, reset: bool = False, scale: float = None
+) -> Iterator[npt.NDArray[np.uint8]]:
     """Open file at filepath and set up global vars if necessary
 
     :param filepath: path to file to open
     :vartype filepath: str
     :param reset: reset any global variables set up from opening initial video
     :vartype reset: bool
+    :param scale: scale of original input size to output size
+    :vartype partial_scale: float
     :returns: pixel content as iterator of numpy arrays
     :rtype: Iterator[npt.NDArray[np.uint8]]
     """
@@ -239,11 +242,14 @@ def open_file(filepath: str, reset: bool = False) -> Iterator[npt.NDArray[np.uin
 
     if is_video(filepath):
         video = VideoFileClip(filepath, audio=False)
+        if scale:
+            video = video.resized(new_size=(int(video.w * scale), int(video.h * scale)))
 
         new_dims = None
         new_length = None
         if _setup["dimensions"] is None or reset:
             _setup["dimensions"] = (video.h, video.w)
+            print(scale, ":", _setup["dimensions"])
         else:
             new_dims = _setup["dimensions"]
 
@@ -260,6 +266,11 @@ def open_file(filepath: str, reset: bool = False) -> Iterator[npt.NDArray[np.uin
         return itertools.cycle(video.iter_frames())
     else:
         img = Image.open(filepath).convert("RGB")
+        if scale:
+            img = img.resize(
+                (int(img.size[0] * scale), int(img.size[1] * scale)),
+                Image.Resampling.LANCZOS,
+            )
 
         if _setup["dimensions"] is None or reset:
             _setup["dimensions"] = (img.size[1], img.size[0])
@@ -312,9 +323,9 @@ def dither(
     :rtype: npt.NDArray[np.uint8]
     """
     brightness[:] = (
-        tf[...,0].astype(np.uint16) * 54 +
-        tf[...,1].astype(np.uint16) * 183 +
-        tf[...,2].astype(np.uint16) * 19
+        tf[..., 0].astype(np.uint16) * 54
+        + tf[..., 1].astype(np.uint16) * 183
+        + tf[..., 2].astype(np.uint16) * 19
     ) >> 8
 
     if invert:
@@ -363,9 +374,9 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
             bf = next(generators[i])
             np.copyto(tf, work)
             dither(
-                bf, 
-                tf, 
-                ms[i], 
+                bf,
+                tf,
+                ms[i],
                 work,
                 brightness,
                 mask,
@@ -386,15 +397,24 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
                 [
                     "ffmpeg",
                     "-y",
-                    "-f", "rawvideo",
-                    "-vcodec", "rawvideo",
-                    "-pix_fmt", "rgb24",
-                    "-s", f"{w}x{h}",
-                    "-r", str(_setup["fps"]),
-                    "-i", "-",
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-pix_fmt", "yuv420p",
+                    "-f",
+                    "rawvideo",
+                    "-vcodec",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-s",
+                    f"{w}x{h}",
+                    "-r",
+                    str(_setup["fps"]),
+                    "-i",
+                    "-",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-pix_fmt",
+                    "yuv420p",
                     of,
                 ],
                 stdin=subprocess.PIPE,
@@ -409,8 +429,7 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
             clip = VideoClip(lambda t: generate(), duration=_setup["duration"])
             clip.fps = _setup["fps"]
             clip.write_videofile(
-                of, 
-                preset=("medium" if args.quality_encoding else "ultrafast")
+                of, preset=("medium" if args.quality_encoding else "ultrafast")
             )
     print(of)
 
@@ -426,7 +445,7 @@ def main():
             help="use layer mode for dithering (default)",
         )
         parser.add_argument(
-            "-s",
+            "-I",
             "--individual",
             type=str,
             nargs="?",
@@ -495,21 +514,28 @@ def main():
             action="store_true",
             help="process single frames with ffmpeg instead of using moviepy",
         )
+        parser.add_argument(
+            "-s",
+            "--scale",
+            type=float,
+            help="scale input dimensions by SCALE value (for base input dimensions)"
+        )
+
         parser.add_argument("--seed", type=int, help="seed for matrix generation")
         args = parser.parse_args()
 
         os.makedirs(args.output, exist_ok=True)
 
         if args.individual or args.background:
-            bg_img = open_file(args.background) if args.background else None
+            bg_img = open_file(args.background, scale=args.scale) if args.background else None
             color_value = from_hex(args.individual) if args.individual else None
 
             for f in args.images:
                 if args.background:
-                    bg_frames = open_file(args.background, reset=True)
-                    frames = open_file(f)
+                    bg_frames = open_file(args.background, reset=True, scale=args.scale)
+                    frames = open_file(f, scale=args.scale)
                 else:
-                    frames = open_file(f, reset=True)
+                    frames = open_file(f, reset=True, scale=args.scale)
                     bg_frames = itertools.cycle(
                         repeat(
                             np.full(
@@ -526,14 +552,14 @@ def main():
             if len(args.images) < 2:
                 raise Exception("must provide 2 or more files for layered dithering")
 
-            frames = open_file(args.images[0])
-            generators = [frames] + [open_file(x) for x in args.images[1:]]
+            frames = open_file(args.images[0], scale=args.scale)
+            generators = [frames] + [open_file(x, scale=args.scale) for x in args.images[1:]]
             create_output(args.images[0], generators, args)
 
         for f in _tempfiles:
             os.remove(f)
     except Exception as e:
-        raise(e)
+        raise (e)
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
