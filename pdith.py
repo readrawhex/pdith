@@ -16,7 +16,6 @@ from PIL import Image
 from pathlib import PurePath
 from typing import Iterator
 
-
 _setup = {
     # global values for frame / video resizing
     "dimensions": None,
@@ -80,6 +79,7 @@ def get_matrix(
     dims: (int, int) = None,
     res: int = 1,
     curve: float = 1,
+    buffer: npt.NDArray[np.uint8] = None,
 ) -> [[(int, int, int)]]:
     """Generate a matrix for use with dithering.
 
@@ -105,8 +105,8 @@ def get_matrix(
         width = 8
         height = 8
     elif width is None or height is None:
-        width = width if width else height
-        height = height if height else width
+        width = width or height
+        height = height or width
 
     if width < 1 or height < 1:
         raise ValueError("width and height values must be positive")
@@ -114,24 +114,30 @@ def get_matrix(
         raise ValueError("matrix resolution must be positive")
 
     rng = np.random.default_rng(seed)
-    m = rng.integers(0, 256, size=(height, width), dtype=np.uint8)
+    if buffer is None or buffer.shape != (height, width):
+        buffer = np.empty((height, width), dtype=np.uint8)
+    buffer[:] = np.frombuffer(
+        rng.bytes(buffer.size),
+        dtype=np.uint8
+    ).reshape(buffer.shape)
 
     if curve != 1:
-        tmp = m.astype(np.float32)
+        tmp = buffer.astype(np.float32, copy=False)
         np.divide(tmp, 255.0, out=tmp)
         np.power(tmp, curve, out=tmp)
         np.multiply(tmp, 255.0, out=tmp)
         np.clip(tmp, 0, 255, out=tmp)
-        m = tmp.astype(np.uint8)
+        buffer[:] = tmp.astype(np.uint8)
 
     if res > 1:
-        m = np.repeat(m, res, axis=0)
-        m = np.repeat(m, res, axis=1)
+        buffer = buffer.repeat(res, 0).repeat(res, 1)
     if dims:
         f_h, f_w = dims
-        m = m[np.arange(f_h) % height][:, np.arange(f_w) % width]
+        rows = np.mod(np.arange(f_h), height)
+        cols = np.mod(np.arange(f_w), width)
+        buffer = buffer[rows][:, cols]
 
-    return m
+    return buffer
 
 
 def is_video(filepath: str) -> bool:
@@ -227,7 +233,7 @@ def open_file(filepath: str, reset: bool = False) -> Iterator[npt.NDArray[np.uin
     :param reset: reset any global variables set up from opening initial video
     :vartype reset: bool
     :returns: pixel content as iterator of numpy arrays
-    :rtype: Iterator[npt.NDArray[np.unit8]]
+    :rtype: Iterator[npt.NDArray[np.uint8]]
     """
     global _setup
 
@@ -275,6 +281,9 @@ def dither(
     bf: npt.NDArray[np.uint8],
     tf: npt.NDArray[np.uint8],
     m: npt.NDArray[np.uint8],
+    out: npt.NDArray[np.uint8],
+    brightness: npt.NDArray[np.uint8],
+    mask: npt.NDArray[np.uint8],
     invert: bool = False,
 ) -> npt.NDArray[np.uint8]:
     """Dither frame using dither matrix with specified background frame
@@ -291,20 +300,30 @@ def dither(
     :vartype tf: npt.NDArray[np.uint8]
     :param m: dithering matrix
     :vartype m: npt.NDArray[np.uint8]
+    :param out: buffer to write output to (pre allocated)
+    :vartype out: npt.NDArray[np.uint8]
+    :param brightness: brightness buffer (pre allocated)
+    :vartype brightness: npt.NDArray[np.uint8]
+    :param mask: mask buffer (pre allocated)
+    :vartype mask: npt.NDArray[np.uint8]
     :param invert: invert dithering mask
     :vartype invert: bool
     :returns: dithered output frame
     :rtype: npt.NDArray[np.uint8]
     """
-    brightness = (tf @ bweights).astype(np.uint8)
-    if invert:
-        mask = brightness < m
-    else:
-        mask = brightness >= m
+    brightness[:] = (
+        tf[...,0].astype(np.uint16) * 54 +
+        tf[...,1].astype(np.uint16) * 183 +
+        tf[...,2].astype(np.uint16) * 19
+    ) >> 8
 
-    out = bf.copy()
-    out[mask] = tf[mask]
-    return out
+    if invert:
+        np.less(brightness, m, out=mask)
+    else:
+        np.greater_equal(brightness, m, out=mask)
+
+    np.copyto(out, bf)
+    np.copyto(out, tf, where=mask[..., None])
 
 
 def create_output(filename: str, generators: [iter], args: argparse.Namespace):
@@ -329,13 +348,31 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
         for x in range(0, len(generators) - 1)
     ]
 
+    h, w = _setup["dimensions"]
+    work = np.empty((h, w, 3), dtype=np.uint8)
+    tf = np.empty((h, w, 3), dtype=np.uint8)
+    brightness = np.empty((h, w), dtype=np.uint8)
+    mask = np.empty((h, w), dtype=bool)
+
     def generate():
-        """layered dithering"""
         frame = next(generators[-1])
-        for i in reversed(range(len(ms))):
+        np.copyto(work, frame)
+        iter_values = reversed(range(len(ms)))
+
+        for i in iter_values:
             bf = next(generators[i])
-            frame = dither(bf, frame, ms[i], args.invert)
-        return frame
+            np.copyto(tf, work)
+            dither(
+                bf, 
+                tf, 
+                ms[i], 
+                work,
+                brightness,
+                mask,
+                args.invert,
+            )
+
+        return work
 
     of = output_filepath(filename, args.output)
     if _setup["frame_length"] == 1:
@@ -365,7 +402,7 @@ def create_output(filename: str, generators: [iter], args: argparse.Namespace):
 
             for _ in range(_setup["frame_length"]):
                 frame = generate()
-                proc.stdin.write(frame.tobytes())
+                proc.stdin.write(memoryview(frame))
             proc.stdin.close()
             proc.wait()
         else:
@@ -496,6 +533,7 @@ def main():
         for f in _tempfiles:
             os.remove(f)
     except Exception as e:
+        raise(e)
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
